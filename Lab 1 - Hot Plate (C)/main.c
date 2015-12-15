@@ -9,24 +9,64 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <sys/time.h>
 
-#define MAX_ARRAY_SIZE 16384
+#define MAX_ARRAY_SIZE 8192
 
-float** arr1;
-float** arr2;
-float*** tempArray; // Holder for swapping arrays.
+float** currentArray;
+float** previousArray;
 
 /*
     Organization:
     ARRAY[ROW][COLUMN]
 */
 
-//double When()
-//{
-//    struct timeval tp;
-//    gettimeofday(&tp, NULL);
-//    return ((double) tp.tv_sec + (double) tp.tv_usec * 1e-6);
-//}
+double When()
+{
+    struct timeval tp;
+    gettimeofday(&tp, NULL);
+    return ((double) tp.tv_sec + (double) tp.tv_usec * 1e-6);
+}
+
+void swapArrays() {
+    float** tempArray = currentArray;
+    currentArray = previousArray;
+    previousArray = tempArray;
+}
+
+int isFixedCell(int i, int j) {
+    if (i == 400 && (j >= 0 && j <= 330)) {
+        return 1;
+    }
+    
+    if (i == 200 && j == 500) {
+        return 1;
+    }
+        
+    return 0;
+}
+
+float getDifference(int i, int j) {
+    float middle = currentArray[i][j];
+    
+    float up = currentArray[i - 1][j];
+    float down = currentArray[i + 1][j];
+    float left = currentArray[i][j - 1];
+    float right = currentArray[i][j + 1];
+    
+    return fabs(middle - ((down + up + right + left) / 4));
+}
+
+float calculateNewCell(int i, int j) {
+    float middle = previousArray[i][j];
+    
+    float up = previousArray[i - 1][j];
+    float down = previousArray[i + 1][j];
+    float left = previousArray[i][j - 1];
+    float right = previousArray[i][j + 1];
+    
+    return (down + up + right + left + (middle * 4)) / 8;
+}
 
 void writeCSV(float** arr) {
     FILE *fp = fopen("hotplateOutput.csv", "w+");
@@ -45,112 +85,125 @@ void writeCSV(float** arr) {
 }
 
 void setupArrays() {
+    #pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < MAX_ARRAY_SIZE; i++) {
         for (int j = 0; j < MAX_ARRAY_SIZE; j++) {
-            arr1[i][j] = 50; // All other cells
+            currentArray[i][j] = 50;                // All other cells
+            previousArray[i][j] = 50;
         }
         
-        arr1[0][i] = 0;                     // Top row
-        arr2[0][i] = 0;
-        arr1[i][0] = 0;                     // Left side
-        arr2[0][i] = 0;
-        arr1[i][MAX_ARRAY_SIZE - 1] = 0;    // Right side
-        arr2[i][MAX_ARRAY_SIZE - 1] = 0;
-        arr1[MAX_ARRAY_SIZE - 1][i] = 100;  // Bottom row
-        arr2[MAX_ARRAY_SIZE - 1][i] = 100;
+        currentArray[0][i] = 0;                     // Top row
+        previousArray[0][i] = 0;
+        
+        currentArray[i][0] = 0;                     // Left side
+        previousArray[i][0] = 0;
+        
+        currentArray[i][MAX_ARRAY_SIZE - 1] = 0;    // Right side
+        previousArray[i][MAX_ARRAY_SIZE - 1] = 0;
+        
+        currentArray[MAX_ARRAY_SIZE - 1][i] = 100;  // Bottom row
+        previousArray[MAX_ARRAY_SIZE - 1][i] = 100;
     }
     
     for (int i = 0; i <= 330; i++) {
-        arr1[400][i] = 100;
-        arr2[400][i] = 100;
+        currentArray[400][i] = 100;
+        previousArray[400][i] = 100;
     }
     
-    arr1[200][500] = 100;
-    arr2[200][500] = 100;
+    currentArray[200][500] = 100;
+    previousArray[200][500] = 100;
 }
 
 void allocateArray(float*** array) {
     *array = (float **) malloc(MAX_ARRAY_SIZE * (sizeof(float *)));
     
+    #pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < MAX_ARRAY_SIZE; i++) {
         (*array)[i] = (float *) malloc(MAX_ARRAY_SIZE * (sizeof(float)));
     }
 }
 
 int arrayIsFinished() {
-    int isFinished = 1;
     float difference = 0;
+    float isFinished = 1;
     
+    #pragma omp parallel for schedule(dynamic)
     // Avoid iterating over borders.
     for (int i = 1; i < MAX_ARRAY_SIZE - 1; i++) {
-        for (int j = 1; j < MAX_ARRAY_SIZE - 1; j++) {
-            // Avoid static cells, save computations.
-            if (i == 400 && j <= 330) {
-                continue;
-            } else if (i == 200 && j == 500) {
-                continue;
+        if (isFinished == 1) {
+            for (int j = 1; j < MAX_ARRAY_SIZE - 1; j++) {
+                // Avoid static cells, save computations.
+                if (isFixedCell(i, j) == 0) {
+                    difference = getDifference(i, j);
+                    
+                    if (difference >= 0.1) {
+//                        printf("\nDifference: %f", difference);
+//                        printf("\nRow: %d || Col: %d", i, j);
+                        isFinished = 0;
+                        break;
+                    }
+                }
             }
-            
-            difference = fabsf(arr2[i][j] - ((arr2[i + 1][j] + arr2[i - 1][j] + arr2[i][j + 1] + arr2[i][j - 1]) / 4));
-            
-            if (difference > 0.1) {
-//                printf("\nDifference: %f", difference);
-//                printf("\nValue: %f", arr2[i][j]);
-                isFinished = 0;
-                break;
-            }
-        }
-        
-        if (isFinished == 0) {
-//            printf("\nRow: %d", i);
-            break;
         }
     }
     
-//    printf("\nDifference: %f", difference);
     return isFinished;
 }
 
-double calculateSteadyState() {
+int calculateSteadyState() {
     int isFinished = 0;
     int iterations = 0;
     
     while (isFinished == 0) {
         iterations++;
+        swapArrays();
         
+        #pragma omp parallel for schedule(dynamic)
         // Avoid iterating over borders.
         for (int i = 1; i < MAX_ARRAY_SIZE - 1; i++) {
+            #pragma omp parallel for
             for (int j = 1; j < MAX_ARRAY_SIZE - 1; j++) {
                 // Avoid static cells.
-                if (i == 400 && j <= 330) {
-                    continue;
-                } else if (i == 200 && j == 500) {
-                    continue;
+                if (isFixedCell(i, j) == 0) {
+                    currentArray[i][j] = calculateNewCell(i, j);
                 }
-                
-                arr2[i][j] = (arr1[i + 1][j] + arr1[i - 1][j] + arr1[i][j + 1] + arr1[i][j - 1] + (4 * arr1[i][j])) / 8;
             }
         }
         
         isFinished = arrayIsFinished();
-        
-        tempArray = &arr1;
-        arr1 = arr2;
-        arr2 = *tempArray;
-        
-        printf("\nIterations: %d", iterations);
     }
     
-    // TODO: FIX ME!
-    return 0;
+    return iterations;
+}
+
+int countCellsOverThreshold() {
+    int count = 0;
+    
+    // Avoid iterating over borders.
+    for (int i = 1; i < MAX_ARRAY_SIZE - 1; i++) {
+        for (int j = 1; j < MAX_ARRAY_SIZE - 1; j++) {
+            if (currentArray[i][j] > 50) {
+                count++;
+            }
+        }
+    }
+    
+    return count;
 }
 
 int main(int argc, const char * argv[]) {
-    allocateArray(&arr1);
-    allocateArray(&arr2);
+    double startTime = When();
+    allocateArray(&currentArray);
+    allocateArray(&previousArray);
     setupArrays();
     
-    calculateSteadyState();
+    int iterations = calculateSteadyState();
+    int result = countCellsOverThreshold();
     
-//    writeCSV(arr2);
+    double endTime = When();
+    
+    printf("Iterations: %d", iterations);
+    printf("\nCells 50+: %d\n", result);
+    printf("\nTotal Execution Time: %f\n", endTime - startTime);
+//    writeCSV(currentArray);
 }
