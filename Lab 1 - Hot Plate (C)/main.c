@@ -85,7 +85,7 @@ void writeCSV(float** arr) {
 }
 
 void setupArrays() {
-    #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(auto)
     for (int i = 0; i < MAX_ARRAY_SIZE; i++) {
         for (int j = 0; j < MAX_ARRAY_SIZE; j++) {
             currentArray[i][j] = 50;                // All other cells
@@ -117,7 +117,7 @@ void setupArrays() {
 void allocateArray(float*** array) {
     *array = (float **) malloc(MAX_ARRAY_SIZE * (sizeof(float *)));
     
-    #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(auto)
     for (int i = 0; i < MAX_ARRAY_SIZE; i++) {
         (*array)[i] = (float *) malloc(MAX_ARRAY_SIZE * (sizeof(float)));
     }
@@ -127,7 +127,7 @@ int arrayIsFinished() {
     float difference = 0;
     float isFinished = 1;
     
-    #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(auto)
     // Avoid iterating over borders.
     for (int i = 1; i < MAX_ARRAY_SIZE - 1; i++) {
         if (isFinished == 1) {
@@ -158,7 +158,7 @@ int calculateSteadyState() {
         iterations++;
         swapArrays();
         
-        #pragma omp parallel for schedule(dynamic)
+        #pragma omp parallel for schedule(auto)
         // Avoid iterating over borders.
         for (int i = 1; i < MAX_ARRAY_SIZE - 1; i++) {
             #pragma omp parallel for
